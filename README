@@ -1,0 +1,5 @@
+0 -> Installer nodejs
+1 -> npm i
+2 -> tsc src/getAllMatchUrl.ts 
+3 -> node src.getAllMatchUrl.js
+* => check les deux fichiers dans output
