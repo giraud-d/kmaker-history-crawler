@@ -6,13 +6,18 @@ var rp = require('request-promise');
 var fs = require('fs');
 const async = require('async');
 
+var forEachTimeout = require('foreach-timeout');
+
 class GetAllMatchUrl {
 
     private domainUrl = "https://www.flashscore.com";
     private timeAtLaunch;
+    private urlError = [];
+    private timeOut; // en ms
 
-    constructor() {
+    constructor(timeout) {
         this.timeAtLaunch = Date.now();
+        this.timeOut = timeout;
         this.getAllTournamentUrl((allTournamentUrl) => {
             this.getAllTournamentYearUrl(allTournamentUrl);
         });
@@ -48,13 +53,12 @@ class GetAllMatchUrl {
         let promises = [];
         let nbRequest = 0;
 
-        // parcours toutes les urls en entrés
-        urls.forEach(element => {
-            // push le code qui suit dans un array de Promise
-            promises.push(
+        forEachTimeout(
+            urls,
+            url => Promise.resolve(
                 // Effectue la requète
                 rp({
-                    uri: element,
+                    uri: url,
                     transform: (body) => {return cheerio.load(body)}
                 })
                 // Le $ correspond au retour de cherrio.load(body)
@@ -63,35 +67,41 @@ class GetAllMatchUrl {
                     $('tbody tr').each((index, element) => {
                         tournoisListYearSingleTab[index] = this.domainUrl + $(element).find('a').attr('href') + 'results';
                     });
-                    this.displayARequestSucces(element, nbRequest++);
+                    this.displayARequestSucces(url, nbRequest++);
                     return tournoisListYearSingleTab;
                 })
                 .catch((err) => this.displayARequestError(url, err, nbRequest++)) 
-            );
-        });
-
-        // Un double tableau ici
-        Promise.all(promises).then((tournoisListYearDoubleTab) => {
+            ),
+            this.timeOut
+        ).then((tournoisListYearDoubleTab) => {
             // Une fois toutes les promises résolues le code dans la then est exécuté
             this.displayTimeAndMsg("allTournamentYearUrl");
             let tournoisListYearTab = this.convertDoubleToSingleTab(tournoisListYearDoubleTab);
             this.saveAsFile(tournoisListYearTab, "allTournamentYearUrl");
+            this.saveAsFile(this.urlError, "allTournamentYearUrlERROR");
+            this.flushUrlErr();
             // Lance l'étape 3
             this.getAllMatchUrl(tournoisListYearTab);
         });
     }
 
+    // TODO les matchs de qualif dans certains tournois quand il y a beacoup de match
+
+    /**
+     * Récupération des urls de tout les match de toutes les éditions de tout les tournois ATP
+     * @param urls en entré toutes les urls de toutes les éditions de tout les tournois aTP
+     * Retournera (on sait pas encore) entre 60k et 90k urls
+     */
     getAllMatchUrl(urls) {
         let promises = [];
         let nbRequest = 0;
 
-        // parcours toutes les urls en entrés
-        urls.forEach(element => {
-            // push le code qui suit dans un array de Promise
-            promises.push(
+        forEachTimeout(
+            urls,
+            url => Promise.resolve(
                 // Effectue la requète
                 rp({
-                    uri: element,
+                    uri: url,
                     transform: (body) => {return cheerio.load(body)}
                 })
                 // Le $ correspond au retour de cherrio.load(body)
@@ -114,22 +124,23 @@ class GetAllMatchUrl {
                         i = stringImmonde.indexOf(idPrefix, i + 7 + 9);
                     }
 
-                    this.displayARequestSucces(element, nbRequest++)
+                    this.displayARequestSucces(url, nbRequest++)
                     return matchsList;
                 })
-                .catch((err) => this.displayARequestError(url, err, nbRequest++)) 
-            )
-        });
-
-        // Un double tableau ici
-        Promise.all(promises).then((matchsListDoubleTab) => {
+                .catch((err) => {
+                    this.displayARequestError(url, err, nbRequest++);
+                    this.stockUrlError(url);
+                }) 
+            ),
+            this.timeOut
+        ).then((matchsListDoubleTab) => {
             // Une fois toutes les promises résolues le code dans la then est exécuté
             this.displayTimeAndMsg("allMatchUrl");
             let matchsListTab = this.convertDoubleToSingleTab(matchsListDoubleTab);
-            this.saveAsFile(matchsListTab, "allTournamentYearUrl");
+            this.saveAsFile(matchsListTab, "matchUrl");
+            this.saveAsFile(this.urlError, "matchUrlERROR");
         });
     }
-
 
     /*
     Utils
@@ -148,6 +159,14 @@ class GetAllMatchUrl {
         let t2 = Date.now()
         let dif = (t2 - this.timeAtLaunch) / 1000;
         console.log("\n\tEtape : [" + stape + "] effectué en : " + dif + "\n");  
+    }
+    
+    stockUrlError(url) {
+        this.urlError.push(url);
+    }
+
+    flushUrlErr() {
+        this.urlError = [];
     }
 
     convertDoubleToSingleTab(doubleTab) {
@@ -170,4 +189,5 @@ class GetAllMatchUrl {
     }
 }
 
-let getAllMatchUrl = new GetAllMatchUrl();
+// Avec 5 s de timeout entre deux requètes
+let getAllMatchUrl = new GetAllMatchUrl(1000);
